@@ -1,0 +1,102 @@
+#!/usr/bin/env sh
+
+
+# TODO: does this required BASH?
+
+
+DEBUG_ENABLED = 0
+function DEBUG_LOG { [ $DEBUG_ENABLED = 1 ] && echo "$@" }
+
+
+# Get previous commit ID, new commit ID, and reference by reading stdin
+read old_revision new_revision reference
+DEBUG_LOG "old_revision=$old_revision"
+DEBUG_LOG "new_revision=$new_revision"
+DEBUG_LOG "reference=$reference"
+
+
+# If creating or deleting a branch, no need to do any checks, exit
+if [ ${old_revision:0:8} = '00000000' ] || [ ${new_revision:0:8} = '00000000' ]; then
+  # Simply let the commit go through
+  DEBUG_LOG 'branch creation/deletion detected, exiting without applying rules'
+  exit 0
+fi
+
+
+# Set GIT commit message
+# Prints string showing commit message of $new_revision
+commit_message=$(git log --format=%s -n 1 $new_revision)
+DEBUG_LOG "commit_message=$commit_message"
+
+
+### Detect GIT submodules
+# git config should yield submodules as '<submodule_path_key> <submodule_path_value>'
+git config --file <(git show $ref:.gitmodules) --get-regexp 'submodule..*.path' |
+while read key path; do
+  DEBUG_LOG "working on submodule: path=$path"
+  url=$(git config --file <(git show $ref:.gitmodules) --get "${key/.path/.url}")
+  DEBUG_LOG "url=$url"
+
+  # Assume that the submodules are locally stored repositories on the same
+  # system. Converts repository URL so it can be located
+  url=$(echo $url | sed -nE 's|.*/(.*)$|../\1.git|p')
+  DEBUG_LOG 'modified url for local seeking'
+  DEBUG_LOG "url=$url"
+  # Make sure submodule directory is found
+  if [ ! -d "$url" ]; then
+    DEBUG_LOG 'Unable to find submodule locally! Cancelling check...'
+    continue
+  fi
+
+  # Get an absolute local url
+  url=$(cd $url && pwd)
+  DEBUG_LOG 'converted url to absolute local'
+  DEBUG_LOG "url=$url"
+
+  # Create a list of submodule commits not in current reference (updated)
+  git diff "$reference..$new_revision" -- "$path" | 
+  grep '^-Subproject commit' -A1 | 
+  cut -d' ' -f3 |
+  while read sub_old_revision && read sub_new_revision; do
+    DEBUG_LOG "Checking submodule update: sub_old_revision=$sub_old_revision sub_new_revision=$sub_new_revision commit_message=$commit_message url=$url"
+
+    commit_linecount=$(GIT_DIR="$url" git branch --contains "$sub_new_revision" 2>/dev/null | wc -l)
+
+    # If no lines are returned, then the commit doesn't appear to exist in the
+    # local submodule
+    if [ $commit_linecount == 0 ]; then
+      echo "Error found in ${new_revision:0:8}($commit_message):"
+      echo "  Submodule commit <${sub_new_revision:0:8}> not found in submodule <$path> (<$url>)" <&2
+      echo "  Please push that submodule (<$path>) first!" >&2
+      echo "  Refusing to receive push with missing commit/s"
+      exit 1
+
+    else
+      
+      # If the new reference is a parent of the old reference, then this would
+      # be a submodule downgrade. Alert the user and refuse push.
+      if GIT_DIR=$url git rev-list $sub_old_revision | grep -q $sub_new_revision; then
+        echo "Error found in ${new_revision:0:8}($commit_message)"
+        echo "  Error! Detected submodule downgrade ($path) from <${sub_old_revision}> to <${sub_new_revision}>"
+        echo "  Refusing to push with submodule downgrade"
+        exit 1
+
+      elif ! GIT_DIR="$url" git rev-list "$sub_new_revision" | grep -q "$sub_old_revision"; then
+        echo "Error in ${new_revision:0:8}(${commit_message}):"
+        echo "  Error! Trying to switch submodule (<$path>) branch from <${sub_old_revision:0:8}> to <${sub_new_revision}"
+        echo "  Refusing to receive push with submodule branch discrepencies"
+        exit 1 
+      fi
+    fi
+  # Finish looping unreferenced submodule commits
+  DEBUG_LOG 'Finished looping unreferenced submodule commits'
+  done || exit 1
+# Finish looping detected submodules
+DEBUG_LOG 'Finished looping submodule references'
+done || exit 1
+
+
+exit 0
+
+  
+      

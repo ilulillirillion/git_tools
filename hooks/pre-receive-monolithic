@@ -1,7 +1,4 @@
-#!/usr/bin/env sh
-
-
-# TODO: does this required BASH?
+#!/usr/bin/env bash
 
 
 #DEBUG_ENABLED=1
@@ -34,7 +31,7 @@ echo "commit_message=$commit_message"
 git config --file <(git show $reference:.gitmodules) --get-regexp 'submodule..*.path' |
 while read key path; do
   echo "working on submodule: path=$path"
-  url=$(git config --file $(git show $reference:.gitmodules) --get "${key/.path/.url}")
+  url=$(git config --file <(git show $reference:.gitmodules) --get "${key/.path/.url}")
   echo "url=$url"
 
   # Assume that the submodules are locally stored repositories on the same

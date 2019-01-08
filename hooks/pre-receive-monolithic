@@ -4,21 +4,21 @@
 # TODO: does this required BASH?
 
 
-DEBUG_ENABLED = 0
-function DEBUG_LOG { [ $DEBUG_ENABLED = 1 ] && echo "$@" }
+#DEBUG_ENABLED=1
+#function DEBUG_LOG { [ $DEBUG_ENABLED = 1 ] && echo "$@" }
 
 
 # Get previous commit ID, new commit ID, and reference by reading stdin
 read old_revision new_revision reference
-DEBUG_LOG "old_revision=$old_revision"
-DEBUG_LOG "new_revision=$new_revision"
-DEBUG_LOG "reference=$reference"
+echo "old_revision=$old_revision"
+echo "new_revision=$new_revision"
+echo "reference=$reference"
 
 
 # If creating or deleting a branch, no need to do any checks, exit
 if [ ${old_revision:0:8} = '00000000' ] || [ ${new_revision:0:8} = '00000000' ]; then
   # Simply let the commit go through
-  DEBUG_LOG 'branch creation/deletion detected, exiting without applying rules'
+  echo 'branch creation/deletion detected, exiting without applying rules'
   exit 0
 fi
 
@@ -26,39 +26,43 @@ fi
 # Set GIT commit message
 # Prints string showing commit message of $new_revision
 commit_message=$(git log --format=%s -n 1 $new_revision)
-DEBUG_LOG "commit_message=$commit_message"
+echo "commit_message=$commit_message"
 
 
 ### Detect GIT submodules
 # git config should yield submodules as '<submodule_path_key> <submodule_path_value>'
-git config --file <(git show $ref:.gitmodules) --get-regexp 'submodule..*.path' |
+git config --file <(git show $reference:.gitmodules) --get-regexp 'submodule..*.path' |
 while read key path; do
-  DEBUG_LOG "working on submodule: path=$path"
-  url=$(git config --file <(git show $ref:.gitmodules) --get "${key/.path/.url}")
-  DEBUG_LOG "url=$url"
+  echo "working on submodule: path=$path"
+  url=$(git config --file $(git show $reference:.gitmodules) --get "${key/.path/.url}")
+  echo "url=$url"
 
   # Assume that the submodules are locally stored repositories on the same
   # system. Converts repository URL so it can be located
-  url=$(echo $url | sed -nE 's|.*/(.*)$|../\1.git|p')
-  DEBUG_LOG 'modified url for local seeking'
-  DEBUG_LOG "url=$url"
+  url=$(echo $url | sed -nE 's|.*/(.*)$|../\1|p')
+  echo 'modified url for local seeking (1/2)'
+  echo "url=$url"
+  # Hacky way to append .git if it doesn't exist
+  [[ $url == *.git ]] || url+=.git
+  echo 'modified url for local seeking(2/2)'
+  echo "url=$url"
   # Make sure submodule directory is found
   if [ ! -d "$url" ]; then
-    DEBUG_LOG 'Unable to find submodule locally! Cancelling check...'
+    echo 'Unable to find submodule locally! Cancelling check...'
     continue
   fi
 
   # Get an absolute local url
   url=$(cd $url && pwd)
-  DEBUG_LOG 'converted url to absolute local'
-  DEBUG_LOG "url=$url"
+  echo 'converted url to absolute local'
+  echo "url=$url"
 
   # Create a list of submodule commits not in current reference (updated)
   git diff "$reference..$new_revision" -- "$path" | 
   grep '^-Subproject commit' -A1 | 
   cut -d' ' -f3 |
   while read sub_old_revision && read sub_new_revision; do
-    DEBUG_LOG "Checking submodule update: sub_old_revision=$sub_old_revision sub_new_revision=$sub_new_revision commit_message=$commit_message url=$url"
+    echo "Checking submodule update: sub_old_revision=$sub_old_revision sub_new_revision=$sub_new_revision commit_message=$commit_message url=$url"
 
     commit_linecount=$(GIT_DIR="$url" git branch --contains "$sub_new_revision" 2>/dev/null | wc -l)
 
@@ -66,7 +70,7 @@ while read key path; do
     # local submodule
     if [ $commit_linecount == 0 ]; then
       echo "Error found in ${new_revision:0:8}($commit_message):"
-      echo "  Submodule commit <${sub_new_revision:0:8}> not found in submodule <$path> (<$url>)" <&2
+      echo "  Submodule commit <${sub_new_revision:0:8}> not found in submodule <$path> (<$url>)" >&2
       echo "  Please push that submodule (<$path>) first!" >&2
       echo "  Refusing to receive push with missing commit/s"
       exit 1
@@ -89,14 +93,11 @@ while read key path; do
       fi
     fi
   # Finish looping unreferenced submodule commits
-  DEBUG_LOG 'Finished looping unreferenced submodule commits'
+  echo 'Finished looping unreferenced submodule commits'
   done || exit 1
 # Finish looping detected submodules
-DEBUG_LOG 'Finished looping submodule references'
+echo 'Finished looping submodule references'
 done || exit 1
 
 
 exit 0
-
-  
-      

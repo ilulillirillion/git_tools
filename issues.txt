@@ -1,0 +1,2 @@
+*)  When using multiple remotes, remotes do not seem to be cloned
+*)  pre-receive hook does not seem to reliably catch botched submodules

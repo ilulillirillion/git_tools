@@ -1,0 +1,4 @@
+### Create hook that validates git-crypt
+
+
+### Create hook that checks for common security mishaps
